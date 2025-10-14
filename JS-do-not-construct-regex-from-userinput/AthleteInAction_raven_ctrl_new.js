@@ -1,0 +1,325 @@
+var NewCtrl = ['$scope','$routeParams','$location','$route','ApiModel','$timeout',
+	function($scope,$routeParams,$location,$route,ApiModel,$timeout){
+		
+		$scope.map;
+		$scope.mapOptions;
+		$scope.marker;
+		$scope.geocoder = new google.maps.Geocoder();
+
+		$scope.contacts = [];
+		$scope.options = [];
+		$scope.invitee = null;
+		$scope.newEvent = {
+			invitees: [],
+			expenses: [],
+			days: 0,
+			nights: 0
+		};
+		$scope.submitting = false;
+
+
+
+		// Geocode
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+		$scope.geocode = function(){
+
+			$scope.geocoder.geocode({address: $scope.newEvent.location},function(results,status){
+
+				if (status == google.maps.GeocoderStatus.OK){
+
+					$scope.geoLocation = results;
+					$('#new-map').show();
+					$scope.setMap();
+
+				} else {
+
+					JP('Location not Found');
+					$('#new-map').hide();
+					
+				}
+
+			});
+
+		};
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+		// Set Map
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+		$scope.setMap = function(){
+
+			$('#new-map').width(document.getElementById('loc_input').offsetWidth);
+
+			this.mapOptions = {
+				zoom: 8,
+				center: $scope.geoLocation[0].geometry.location
+			};
+
+			if ($scope.map){
+				$scope.map.setCenter(this.mapOptions.center);
+				$scope.map.setZoom(8);
+			} else {
+				$scope.map = new google.maps.Map(document.getElementById('new-map'),this.mapOptions);
+			}
+
+			if ($scope.marker){$scope.marker.setMap(null);}
+
+			$scope.marker = new google.maps.Marker({
+			    map: $scope.map,
+			    position: this.mapOptions.center,
+			    title: $scope.newEvent.location
+			    //animation: google.maps.Animation.DROP,
+			});
+
+		};
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+
+
+
+		// Get Contacts
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+		$scope.getContacts = function(){
+
+			ApiModel.query({type: 'contacts'},function(data){
+
+				$scope.contacts = data.contacts;
+
+				$.each(data.contacts,function(key,val){
+
+					val.value = val.email;
+					val.label = val.email;
+
+					$scope.options.push(val);
+
+				});
+
+				$scope.setAutoComplete();
+
+			});
+
+		};
+		$scope.getContacts();
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+
+
+
+		// Set Autocomplete
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+		$scope.setAutoComplete = function(){
+
+			$('#invite_input').autocomplete({
+				source: function(request,response){
+
+					var matcher = new RegExp(request.term.toLowerCase());
+
+					var matching = $.grep($scope.options,function(value){
+						
+						if (matcher.test((value.email+'').toLowerCase()) || matcher.test((value.name+'').toLowerCase())){
+							return value;
+						}
+
+					});
+
+					response(matching);
+
+				},
+				select: function(event,value){
+
+					$('#invite_input').trigger('input');
+					$scope.invitee = value.item;
+
+				},
+				focus: function(event,value){
+					$scope.invitee = null;
+				}
+			});
+
+		};
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+
+
+
+		// Add Invitee
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+		$scope.addInvitee = function(){
+
+			$timeout(function(){
+
+				if ($scope.invitee){ // If existing contact
+
+					$scope.invalidEmail = null;
+
+					var k = -1;
+
+					$.each($scope.options,function(key,val){
+
+						if ($scope.invitee.email.toLowerCase() == val.email.toLowerCase()){
+
+							$scope.newEvent.invitees.push(val);
+							k = key;
+
+						}
+
+					});
+
+					if (k > -1){$scope.options.splice(k,1);}
+
+					$scope.newInvitee = null;
+					$scope.invitee = null;
+
+				} else if ($scope.newInvitee && !$scope.invitee) { // If new contact
+
+					if (emailValidate.test($scope.newInvitee)){
+
+						$scope.invalidEmail = null;
+
+						$scope.newEvent.invitees.push({
+							email: $scope.newInvitee,
+							name: null
+						});
+
+						$scope.newInvitee = null;
+						$scope.invitee = null;
+
+					} else {
+
+						$scope.invalidEmail = 'Please use a valid email format';
+
+					}
+
+				}
+
+			},10);
+
+		};
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+
+
+
+		// Remove Invitee
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+		$scope.removeInvitee = function(i){
+
+			if ($scope.newEvent.invitees[i].id){
+
+				$scope.options.push($scope.newEvent.invitees[i]);
+
+			}
+
+			$scope.newEvent.invitees.splice(i,1);
+
+		};
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+
+
+
+		// Add Expense
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+		$scope.addExpense = function(){
+
+			$scope.showMap = true;
+
+			$scope.newEvent.expenses.push({frequency: 'per_day'});
+
+		};
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+
+
+
+		// Remove Expense
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+		$scope.removeExpense = function(i){
+
+			$scope.newEvent.expenses.splice(i,1);
+			$scope.getTotal();
+
+		};
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+
+
+
+		// Get Total
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+		$scope.getTotal = function(){
+
+			$scope.newEvent.totalCost = 0;
+			var total = 0;
+
+			$.each($scope.newEvent.expenses,function(key,val){
+
+				if (val.price){
+
+					var price = Number(val.price);
+
+					if (val.frequency == 'one_time'){
+						total += price;
+					} else if (val.frequency == 'per_day'){
+						total += (price*$scope.newEvent.days);
+					} else if (val.frequency == 'per_night') {
+						total += (price*$scope.newEvent.nights);
+					}
+
+					total = Math.round(total*100)/100;
+					$scope.newEvent.totalCost = total;
+
+				}
+
+			});
+
+		};
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+
+
+
+		// Get Days Diff
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+		$scope.getDays = function(){
+
+			var days = dateDiff($scope.newEvent.start_date,$scope.newEvent.end_date);
+
+			$scope.newEvent.days = days;
+			$scope.newEvent.nights = (days-1);
+
+		};
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+
+
+
+		// Create Event
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+		$scope.createEvent = function(){
+
+			$scope.submitting = true;
+
+			var Event = new ApiModel({event: $scope.newEvent});
+
+			Event.$create({type: 'events'},function(data){
+
+				window.location = '/app/#/events/'+data.event.id
+
+			});
+
+		};
+		////////////////////////////////////////////////////////////////////////////////
+		////////////////////////////////////////////////////////////////////////////////
+
+}];
